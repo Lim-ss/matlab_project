@@ -2,7 +2,7 @@ clear;
 clc;
 
 % 读取节点和单元（1-base数组）
-[Nodes, Elements] = MeshInput('Nodes.txt', 'Elements.txt');
+[Nodes, Elements] = MeshInput('Nodes2.txt', 'Elements2.txt');
 NodesNum = size(Nodes, 1); % (Vertex)
 ElementsNum = size(Elements, 1); % (Triangle)
 
@@ -32,10 +32,10 @@ end
 clear i j k Ke elementIndex;
 
 % 获取边界
-upline = GetLine(Nodes, Elements, 0, 3.3, 5.196, 5.196);
-downline = GetLine(Nodes, Elements, 3, 6, 0, 0);
-rightline = GetLine(Nodes, Elements, 3.2, 6, 5.196, 0);
-leftline = GetLine(Nodes, Elements, 0, 0, 3, 5.196);
+upline = GetLine(Nodes, 0, 3.3, 5.196, 5.196);
+downline = GetLine(Nodes, 3, 6, 0, 0);
+rightline = GetLine(Nodes, 3.2, 6, 5.196, 0);
+leftline = GetLine(Nodes, 0, 0, 3, 5.196);
 arc = GetCircleArc(Nodes, 0, 0, 3);
 
 % 施加力和位移边界条件
@@ -46,30 +46,44 @@ F = FixedStressBoundaryConditions(upline, Nodes, F, 0, 0, 0, 5000);
 [K, F] = FixedDisplacementBoundaryConditions(downline, Nodes, K, F, 0, "y");
 
 % 求解方程组 Kd=F
+% d中元素按照u,v的顺序排列
 d = K \ F; % 注意不要写成 F \ K
+
+%重新组织d的格式，让uv在同一行，看起来更清晰
+for i = 1:NodesNum
+    d(i, 1) = d(2 * i - 1);
+    d(i, 2) = d(2 * i);
+end
+
+d = d(1:NodesNum, 1:2);
+clear i;
+
+[strain, stress] = GetStrainAndStress(Nodes, Elements, d);
+[maxStress, belongElement] = GetMaxStress(stress);
+newNodes = GetNewPosition(Nodes, d);
 
 % 绘制网格
 hold on;
+axis equal;
 PlotMesh(Nodes, Elements, "black");
 plotLine(upline, Nodes, "red");
 plotLine(downline, Nodes, "blue");
 plotLine(rightline, Nodes, "green");
 plotLine(leftline, Nodes, "blue");
 plotCircleArc(arc, Nodes, "red");
-%plotIndex(Nodes);
-axis equal;
-
-newNodes = GetNewPosition(Nodes, d);
-PlotMesh(newNodes, Elements, "red");
+%plotNodesIndex(Nodes,"All");
+plotElementsIndex(Nodes, Elements,"All");
+%PlotMesh(newNodes, Elements, "red");
 hold off;
 
 % 获得单元刚度矩阵Ke
 function Ke = GetElementStiffnessMatrix(elementIndex, Nodes, Elements)
-    % 选项
+    % 选项，在GetStrainAndStress()中也需要修改
     option1 = 2; % 平面应力问题 —— 1，平面应变问题 —— 2
     % 常数
     E = 2E11;
     nu = 0.3;
+    t = 1;
 
     xi = Nodes(Elements(elementIndex, 1), 1);
     yi = Nodes(Elements(elementIndex, 1), 2);
@@ -95,7 +109,6 @@ function Ke = GetElementStiffnessMatrix(elementIndex, Nodes, Elements)
         yj = t;
     end
 
-    t = 1;
     bi = yj - yk;
     bj = yk - yi;
     bk = yi - yj;
@@ -149,9 +162,9 @@ function PlotMesh(Nodes, Elements, color)
 
 end
 
-function Line = GetLine(Nodes, Elements, x1, x2, y1, y2)
+function Line = GetLine(Nodes, x1, x2, y1, y2)
 
-    LineNodes = zeros(1, 1); % 避免警告
+    Line = zeros(1, 1); % 避免警告
     NodesNum = size(Nodes, 1);
     num = 0; % 线段上含有的点的个数
     tolerance = 1e-5;
@@ -162,7 +175,7 @@ function Line = GetLine(Nodes, Elements, x1, x2, y1, y2)
 
         if (x == x1 && y == y1) || (x == x2 && y == y2)
             num = num + 1;
-            LineNodes(num) = nodeIndex;
+            Line(num) = nodeIndex;
             continue;
         end
 
@@ -170,7 +183,7 @@ function Line = GetLine(Nodes, Elements, x1, x2, y1, y2)
 
             if x == x1 && ((y1 < y && y < y2) || (y2 < y && y < y1))
                 num = num + 1;
-                LineNodes(num) = nodeIndex;
+                Line(num) = nodeIndex;
                 continue;
             end
 
@@ -180,7 +193,7 @@ function Line = GetLine(Nodes, Elements, x1, x2, y1, y2)
 
             if y == y1 && ((x1 < x && x < x2) || (x2 < x && x < x1))
                 num = num + 1;
-                LineNodes(num) = nodeIndex;
+                Line(num) = nodeIndex;
                 continue;
             end
 
@@ -188,7 +201,7 @@ function Line = GetLine(Nodes, Elements, x1, x2, y1, y2)
 
         if abs((x -x1) / (x2 - x1) - (y - y1) / (y2 - y1)) < tolerance
             num = num + 1;
-            LineNodes(num) = nodeIndex;
+            Line(num) = nodeIndex;
             continue;
         end
 
@@ -201,11 +214,11 @@ function Line = GetLine(Nodes, Elements, x1, x2, y1, y2)
 
             for j = 1:num - i
 
-                if Nodes(LineNodes(j), 1) > Nodes(LineNodes(j + 1), 1)
+                if Nodes(Line(j), 1) > Nodes(Line(j + 1), 1)
 
-                    t = LineNodes(j);
-                    LineNodes(j) = LineNodes(j + 1);
-                    LineNodes(j + 1) = t;
+                    t = Line(j);
+                    Line(j) = Line(j + 1);
+                    Line(j + 1) = t;
                 end
 
             end
@@ -218,11 +231,11 @@ function Line = GetLine(Nodes, Elements, x1, x2, y1, y2)
 
             for j = 1:num - i
 
-                if Nodes(LineNodes(j), 2) > Nodes(LineNodes(j + 1), 2)
+                if Nodes(Line(j), 2) > Nodes(Line(j + 1), 2)
 
-                    t = LineNodes(j);
-                    LineNodes(j) = LineNodes(j + 1);
-                    LineNodes(j + 1) = t;
+                    t = Line(j);
+                    Line(j) = Line(j + 1);
+                    Line(j + 1) = t;
                 end
 
             end
@@ -230,33 +243,6 @@ function Line = GetLine(Nodes, Elements, x1, x2, y1, y2)
         end
 
     end
-
-    %查找并按顺序存放线段上的三角形
-
-    isInLine = zeros(NodesNum);
-    rank = ones(NodesNum) * 9999;
-
-    for i = 1:num
-        isInLine(LineNodes(i)) = 1;
-        rank(LineNodes(i)) = i;
-    end
-
-    ElementsNum = size(Elements, 1);
-    LineElements = zeros(1, num - 1);
-    num2 = 0;
-
-    for i = 1:ElementsNum
-        inLineNum = isInLine(Elements(i, 1)) + isInLine(Elements(i, 2)) + isInLine(Elements(i, 3));
-
-        if inLineNum == 2
-            minRank = min(rank(Elements(i, 1)), min(rank(Elements(i, 2)), rank(Elements(i, 3))));
-            num2 = num2 + 1;
-            LineElements(minRank) = i;
-        end
-
-    end
-
-    Line = {LineNodes, LineElements};
 
     return;
 end
@@ -303,12 +289,11 @@ end
 
 function plotLine(Line, Nodes, color)
 
-    LineNodes = Line{1};
-    num = size(LineNodes, 2);
-    x1 = Nodes(LineNodes(1), 1);
-    x2 = Nodes(LineNodes(num), 1);
-    y1 = Nodes(LineNodes(1), 2);
-    y2 = Nodes(LineNodes(num), 2);
+    num = size(Line, 2);
+    x1 = Nodes(Line(1), 1);
+    x2 = Nodes(Line(num), 1);
+    y1 = Nodes(Line(1), 2);
+    y2 = Nodes(Line(num), 2);
     plot([x1, x2], [y1, y2], color, 'LineWidth', 1);
 
 end
@@ -357,14 +342,12 @@ end
 function F = FixedStressBoundaryConditions(Line, Nodes, F, stress1X, stress2X, stress1Y, stress2Y)
 
     % stress1和stress2优先根据x进行先后对应
-    LineNodes = Line{1};
-    LineElements = Line{2};
-    num = size(LineNodes, 2);
+    num = size(Line, 2);
 
-    x1 = Nodes(LineNodes(1), 1);
-    x2 = Nodes(LineNodes(num), 1);
-    y1 = Nodes(LineNodes(1), 2);
-    y2 = Nodes(LineNodes(num), 2);
+    x1 = Nodes(Line(1), 1);
+    x2 = Nodes(Line(num), 1);
+    y1 = Nodes(Line(1), 2);
+    y2 = Nodes(Line(num), 2);
 
     if (x1 ~= x2)
 
@@ -372,27 +355,15 @@ function F = FixedStressBoundaryConditions(Line, Nodes, F, stress1X, stress2X, s
         slopeY = (stress2Y - stress1Y) / (x2 - x1);
 
         for i = 1:num - 1
-            xa = Nodes(LineNodes(i), 1);
-            xb = Nodes(LineNodes(i + 1), 1);
-            stressX = (stress1X + slopeX * (xa - x1) + stress1X + slopeX * (xb - x1)) * (xb - xa) / 2;
-            stressY = (stress1Y + slopeY * (xa - x1) + stress1Y + slopeY * (xb - x1)) * (xb - xa) / 2;
+            xa = Nodes(Line(i), 1);
+            xb = Nodes(Line(i + 1), 1);
+            ForceX = (stress1X + slopeX * (xa - x1) + stress1X + slopeX * (xb - x1)) * (xb - xa) / 2;
+            ForceY = (stress1Y + slopeY * (xa - x1) + stress1Y + slopeY * (xb - x1)) * (xb - xa) / 2;
 
-            % n1 = LineElements(i);
-            % n2 = LineElements(i);
-            % n3 = LineElements(i);
-
-            % F(n1 * 2 - 1) = F(n1 * 2 - 1) + stressX / 3;
-            % F(n2 * 2 - 1) = F(n2 * 2 - 1) + stressX / 3;
-            % F(n3 * 2 - 1) = F(n3 * 2 - 1) + stressX / 3;
-
-            % F(n1 * 2) = F(n1 * 2) + stressY / 3;
-            % F(n2 * 2) = F(n2 * 2) + stressY / 3;
-            % F(n3 * 2) = F(n3 * 2) + stressY / 3;
-
-            F(LineNodes(i) * 2 - 1) = F(LineNodes(i) * 2 - 1) + stressX / 2;
-            F(LineNodes(i + 1) * 2 - 1) = F(LineNodes(i + 1) * 2 - 1) + stressX / 2;
-            F(LineNodes(i) * 2) = F(LineNodes(i) * 2) + stressY / 2;
-            F(LineNodes(i + 1) * 2) = F(LineNodes(i + 1) * 2) + stressY / 2;
+            F(Line(i) * 2 - 1) = F(Line(i) * 2 - 1) + ForceX / 2;
+            F(Line(i + 1) * 2 - 1) = F(Line(i + 1) * 2 - 1) + ForceX / 2;
+            F(Line(i) * 2) = F(Line(i) * 2) + ForceY / 2;
+            F(Line(i + 1) * 2) = F(Line(i + 1) * 2) + ForceY / 2;
         end
 
     else
@@ -400,27 +371,15 @@ function F = FixedStressBoundaryConditions(Line, Nodes, F, stress1X, stress2X, s
         slopeY = (stress2Y - stress1Y) / (y2 - y1);
 
         for i = 1:num - 1
-            ya = Nodes(LineNodes(i), 2);
-            yb = Nodes(LineNodes(i + 1), 2);
-            stressX = (stress1X + slopeX * (ya - y1) + stress1X + slopeX * (yb - y1)) * (yb - ya) / 2;
-            stressY = (stress1Y + slopeY * (ya - y1) + stress1Y + slopeY * (yb - y1)) * (yb - ya) / 2;
+            ya = Nodes(Line(i), 2);
+            yb = Nodes(Line(i + 1), 2);
+            ForceX = (stress1X + slopeX * (ya - y1) + stress1X + slopeX * (yb - y1)) * (yb - ya) / 2;
+            ForceY = (stress1Y + slopeY * (ya - y1) + stress1Y + slopeY * (yb - y1)) * (yb - ya) / 2;
 
-            % n1 = LineElements(i);
-            % n2 = LineElements(i);
-            % n3 = LineElements(i);
-
-            % F(n1 * 2 - 1) = F(n1 * 2 - 1) + stressX / 3;
-            % F(n2 * 2 - 1) = F(n2 * 2 - 1) + stressX / 3;
-            % F(n3 * 2 - 1) = F(n3 * 2 - 1) + stressX / 3;
-
-            % F(n1 * 2) = F(n1 * 2) + stressY / 3;
-            % F(n2 * 2) = F(n2 * 2) + stressY / 3;
-            % F(n3 * 2) = F(n3 * 2) + stressY / 3;
-
-            F(LineNodes(i) * 2 - 1) = F(LineNodes(i) * 2 - 1) + stressX / 2;
-            F(LineNodes(i + 1) * 2 - 1) = F(LineNodes(i + 1) * 2 - 1) + stressX / 2;
-            F(LineNodes(i) * 2) = F(LineNodes(i) * 2) + stressY / 2;
-            F(LineNodes(i + 1) * 2) = F(LineNodes(i + 1) * 2) + stressY / 2;
+            F(Line(i) * 2 - 1) = F(Line(i) * 2 - 1) + ForceX / 2;
+            F(Line(i + 1) * 2 - 1) = F(Line(i + 1) * 2 - 1) + ForceX / 2;
+            F(Line(i) * 2) = F(Line(i) * 2) + ForceY / 2;
+            F(Line(i + 1) * 2) = F(Line(i + 1) * 2) + ForceY / 2;
         end
 
     end
@@ -431,21 +390,20 @@ end
 function [K, F] = FixedDisplacementBoundaryConditions(Line, Nodes, K, F, displacement, option)
 
     % option = "x"代表固定x方向位移，option = "y"代表固定y方向位移
-    LineNodes = Line{1};
-    num = size(LineNodes, 2);
+    num = size(Line, 2);
 
     if (option == "x")
 
         for i = 1:num
 
             for j = 1:size(Nodes, 1) * 2
-                F(j) = F(j) - K(2 * LineNodes(i) - 1, j) * displacement;
-                K(j, 2 * LineNodes(i) - 1) = 0;
-                K(2 * LineNodes(i) - 1, j) = 0;
+                F(j) = F(j) - K(2 * Line(i) - 1, j) * displacement;
+                K(j, 2 * Line(i) - 1) = 0;
+                K(2 * Line(i) - 1, j) = 0;
             end
 
-            K(2 * LineNodes(i) - 1, 2 * LineNodes(i) - 1) = 1;
-            F(2 * LineNodes(i) - 1) = displacement;
+            K(2 * Line(i) - 1, 2 * Line(i) - 1) = 1;
+            F(2 * Line(i) - 1) = displacement;
         end
 
     elseif (option == "y")
@@ -453,13 +411,13 @@ function [K, F] = FixedDisplacementBoundaryConditions(Line, Nodes, K, F, displac
         for i = 1:num
 
             for j = 1:size(Nodes, 1) * 2
-                F(j) = F(j) - K(2 * LineNodes(i), j) * displacement;
-                K(j, 2 * LineNodes(i)) = 0;
-                K(2 * LineNodes(i), j) = 0;
+                F(j) = F(j) - K(2 * Line(i), j) * displacement;
+                K(j, 2 * Line(i)) = 0;
+                K(2 * Line(i), j) = 0;
             end
 
-            K(2 * LineNodes(i), 2 * LineNodes(i)) = 1;
-            F(2 * LineNodes(i)) = displacement;
+            K(2 * Line(i), 2 * Line(i)) = 1;
+            F(2 * Line(i)) = displacement;
         end
 
     else
@@ -468,11 +426,44 @@ function [K, F] = FixedDisplacementBoundaryConditions(Line, Nodes, K, F, displac
 
 end
 
-function plotIndex(Nodes)
+function plotNodesIndex(Nodes, option)
+
     NodesNum = size(Nodes, 1);
 
-    for i = 1:NodesNum
+    if option == "All"
+
+        for i = 1:NodesNum
+            text(Nodes(i, 1), Nodes(i, 2), num2str(i), 'FontSize', 10, 'Color', 'black', 'HorizontalAlignment', 'center');
+        end
+
+    else
+
+        i = str2double(option);
         text(Nodes(i, 1), Nodes(i, 2), num2str(i), 'FontSize', 10, 'Color', 'black', 'HorizontalAlignment', 'center');
+
+    end
+
+end
+
+function plotElementsIndex(Nodes, Elements, option)
+
+    ElementsNum = size(Elements, 1);
+
+    if option == "All"
+
+        for i = 1:ElementsNum
+            x = (Nodes(Elements(i, 1), 1) + Nodes(Elements(i, 2), 1) + Nodes(Elements(i, 3), 1)) / 3;
+            y = (Nodes(Elements(i, 1), 2) + Nodes(Elements(i, 2), 2) + Nodes(Elements(i, 3), 2)) / 3;
+            text(x, y, num2str(i), 'FontSize', 10, 'Color', 'black', 'HorizontalAlignment', 'center');
+        end
+
+    else
+
+        i = str2double(option);
+        x = (Nodes(Elements(i, 1), 1) + Nodes(Elements(i, 2), 1) + Nodes(Elements(i, 3), 1)) / 3;
+        y = (Nodes(Elements(i, 1), 2) + Nodes(Elements(i, 2), 2) + Nodes(Elements(i, 3), 2)) / 3;
+        text(x, y, num2str(i), 'FontSize', 10, 'Color', 'black', 'HorizontalAlignment', 'center');
+
     end
 
 end
@@ -483,9 +474,105 @@ function NewNodes = GetNewPosition(Nodes, d)
     NewNodes = zeros(num, 2);
 
     for i = 1:num
-        NewNodes(i, 1) = Nodes(i, 1) + d(2 * i - 1) * times;
-        NewNodes(i, 2) = Nodes(i, 2) + d(2 * i) * times;
+        NewNodes(i, 1) = Nodes(i, 1) + d(i, 1) * times;
+        NewNodes(i, 2) = Nodes(i, 2) + d(i, 2) * times;
     end
 
     return;
+end
+
+function [strain, stress] = GetStrainAndStress(Nodes, Elements, d)
+
+    % 由位移计算应变和应力，应变应力均定义在三角形单元上，而不是节点上
+    % strain中按照epsilonX、epsilonY、gammaXY的顺序排列
+    % stress中按照sigmaX、sigmaY、tauXY、sigma_1(主应力)的顺序排列
+    % 计算时没考虑三角形顺逆时针的影响，因为comsol读出来都是逆时针的所以正确，如果存在顺时针的情况，可能需要修正
+
+    ElementsNum = size(Elements, 1);
+    strain = zeros(ElementsNum, 3);
+    stress = zeros(ElementsNum, 4);
+
+    % 选项，在GetElementStiffnessMatrix()中也需要修改
+    option1 = 2; % 平面应力问题 —— 1，平面应变问题 —— 2
+    % 常数
+    E = 2E11;
+    nu = 0.3;
+
+    if option1 == 1
+        % 平面应力问题
+        D = E / (1 - nu ^ 2) * [1, nu, 0; nu, 1, 0; 0, 0, (1 - nu) / 2];
+    elseif option1 == 2
+        E_ = E / (1 - nu ^ 2);
+        nu_ = nu / (1 - nu);
+        D = E_ / (1 - nu_ ^ 2) * [1, nu_, 0; nu_, 1, 0; 0, 0, (1 - nu_) / 2];
+    else
+        disp("非法选项")
+    end
+
+    for elementIndex = 1:ElementsNum
+
+        xi = Nodes(Elements(elementIndex, 1), 1);
+        yi = Nodes(Elements(elementIndex, 1), 2);
+        xj = Nodes(Elements(elementIndex, 2), 1);
+        yj = Nodes(Elements(elementIndex, 2), 2);
+        xk = Nodes(Elements(elementIndex, 3), 1);
+        yk = Nodes(Elements(elementIndex, 3), 2);
+
+        bi = yj - yk;
+        bj = yk - yi;
+        bk = yi - yj;
+        ci = xk - xj;
+        cj = xi - xk;
+        ck = xj - xi;
+
+        delta = abs(((xj - xi) * (yk - yi) - (xk - xi) * (yj - yi)) / 2);
+
+        B = [bi, 0, bj, 0, bk, 0;
+             0, ci, 0, cj, 0, ck;
+             ci, bi, cj, bj, ck, bk] / (2 * delta);
+
+        ui = d(Elements(elementIndex, 1), 1);
+        vi = d(Elements(elementIndex, 1), 2);
+        uj = d(Elements(elementIndex, 2), 1);
+        vj = d(Elements(elementIndex, 2), 2);
+        uk = d(Elements(elementIndex, 3), 1);
+        vk = d(Elements(elementIndex, 3), 2);
+
+        d_e = [ui; vi; uj; vj; uk; vk];
+
+        epsilon_e = B * d_e;
+
+        sigma_e = D * epsilon_e;
+
+        strain(elementIndex, 1) = epsilon_e(1);
+        strain(elementIndex, 2) = epsilon_e(2);
+        strain(elementIndex, 3) = epsilon_e(3);
+
+        stress(elementIndex, 1) = sigma_e(1);
+        stress(elementIndex, 2) = sigma_e(2);
+        stress(elementIndex, 3) = sigma_e(3);
+
+        % 计算主应力
+        stress(elementIndex, 4) = (sigma_e(1) + sigma_e(2)) / 2 + sqrt(((sigma_e(1) - sigma_e(2)) / 2) ^ 2 + sigma_e(3) ^ 2);
+    end
+
+    return;
+end
+
+function [maxStress, belongElement] = GetMaxStress(stress)
+
+    ElementsNum = size(stress, 1);
+    maxStress = -1;
+
+    for i = 1:ElementsNum
+
+        if maxStress < stress(i, 4)
+            maxStress = stress(i, 4);
+            belongElement = i;
+        end
+
+    end
+
+    return;
+
 end
