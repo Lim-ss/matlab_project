@@ -72,8 +72,8 @@ plotLine(rightline, Nodes, "green");
 plotLine(leftline, Nodes, "blue");
 plotCircleArc(arc, Nodes, "red");
 %plotNodesIndex(Nodes,"All");
-plotElementsIndex(Nodes, Elements,"All");
-%PlotMesh(newNodes, Elements, "red");
+%plotElementsIndex(Nodes, Elements,"All");
+PlotMesh(newNodes, Elements, "red");
 hold off;
 
 % 获得单元刚度矩阵Ke
