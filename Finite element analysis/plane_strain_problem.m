@@ -59,10 +59,10 @@ d = d(1:NodesNum, 1:2);
 clear i;
 
 [strain, stress] = GetStrainAndStress(Nodes, Elements, d);
-[maxStress, belongElement] = GetMaxStress(stress);
+[maxStress, belongElement] = GetMaxStress(stress, "Mises");
 newNodes = GetNewPosition(Nodes, d);
 
-% 绘制网格
+% 绘制网格/输出信息
 hold on;
 axis equal;
 PlotMesh(Nodes, Elements, "black");
@@ -74,6 +74,7 @@ plotCircleArc(arc, Nodes, "red");
 %plotNodesIndex(Nodes,"All");
 %plotElementsIndex(Nodes, Elements,"All");
 PlotMesh(newNodes, Elements, "red");
+OutPutRegionData(Nodes, Elements, 3, 1, 0.2);
 hold off;
 
 % 获得单元刚度矩阵Ke
@@ -436,6 +437,23 @@ function plotNodesIndex(Nodes, option)
             text(Nodes(i, 1), Nodes(i, 2), num2str(i), 'FontSize', 10, 'Color', 'black', 'HorizontalAlignment', 'center');
         end
 
+    elseif option == "region"
+
+        % 只显示特定区域附近的编号
+        xx = 2;
+        yy = 0;
+        radius = 0.2;
+
+        for i = 1:NodesNum
+            x = Nodes(i, 1);
+            y = Nodes(i, 2);
+
+            if abs(x - xx) < radius && abs(y - yy) < radius
+                text(x, y, num2str(i), 'FontSize', 10, 'Color', 'black', 'HorizontalAlignment', 'center');
+            end
+
+        end
+
     else
 
         i = str2double(option);
@@ -457,6 +475,24 @@ function plotElementsIndex(Nodes, Elements, option)
             text(x, y, num2str(i), 'FontSize', 10, 'Color', 'black', 'HorizontalAlignment', 'center');
         end
 
+    elseif option == "region"
+
+        % 只显示特定区域附近的编号
+        xx = 2;
+        yy = 0;
+        radius = 0.2;
+
+        for i = 1:ElementsNum
+
+            x = (Nodes(Elements(i, 1), 1) + Nodes(Elements(i, 2), 1) + Nodes(Elements(i, 3), 1)) / 3;
+            y = (Nodes(Elements(i, 1), 2) + Nodes(Elements(i, 2), 2) + Nodes(Elements(i, 3), 2)) / 3;
+
+            if abs(x - xx) < radius && abs(y - yy) < radius
+                text(x, y, num2str(i), 'FontSize', 10, 'Color', 'black', 'HorizontalAlignment', 'center');
+            end
+
+        end
+
     else
 
         i = str2double(option);
@@ -469,7 +505,7 @@ function plotElementsIndex(Nodes, Elements, option)
 end
 
 function NewNodes = GetNewPosition(Nodes, d)
-    times = 3e6;
+    times = 5e6;
     num = size(Nodes, 1);
     NewNodes = zeros(num, 2);
 
@@ -485,12 +521,12 @@ function [strain, stress] = GetStrainAndStress(Nodes, Elements, d)
 
     % 由位移计算应变和应力，应变应力均定义在三角形单元上，而不是节点上
     % strain中按照epsilonX、epsilonY、gammaXY的顺序排列
-    % stress中按照sigmaX、sigmaY、tauXY、sigma_1(主应力)的顺序排列
+    % stress中按照sigmaX、sigmaY、tauXY、sigma_1(主应力)、sigma_2的顺序排列
     % 计算时没考虑三角形顺逆时针的影响，因为comsol读出来都是逆时针的所以正确，如果存在顺时针的情况，可能需要修正
 
     ElementsNum = size(Elements, 1);
     strain = zeros(ElementsNum, 3);
-    stress = zeros(ElementsNum, 4);
+    stress = zeros(ElementsNum, 6);
 
     % 选项，在GetElementStiffnessMatrix()中也需要修改
     option1 = 2; % 平面应力问题 —— 1，平面应变问题 —— 2
@@ -554,25 +590,100 @@ function [strain, stress] = GetStrainAndStress(Nodes, Elements, d)
 
         % 计算主应力
         stress(elementIndex, 4) = (sigma_e(1) + sigma_e(2)) / 2 + sqrt(((sigma_e(1) - sigma_e(2)) / 2) ^ 2 + sigma_e(3) ^ 2);
+        stress(elementIndex, 5) = (sigma_e(1) + sigma_e(2)) / 2 - sqrt(((sigma_e(1) - sigma_e(2)) / 2) ^ 2 + sigma_e(3) ^ 2);
+        stress(elementIndex, 6) = sqrt(((stress(elementIndex, 4) -stress(elementIndex, 5)) ^ 2 + stress(elementIndex, 4) ^ 2 + stress(elementIndex, 5)) * 1/2);
     end
 
     return;
 end
 
-function [maxStress, belongElement] = GetMaxStress(stress)
+function [maxStress, belongElement] = GetMaxStress(stress, option)
 
     ElementsNum = size(stress, 1);
     maxStress = -1;
 
-    for i = 1:ElementsNum
+    if option == "Principal"
 
-        if maxStress < stress(i, 4)
-            maxStress = stress(i, 4);
-            belongElement = i;
+        for i = 1:ElementsNum
+
+            if maxStress < stress(i, 4)
+                maxStress = stress(i, 4);
+                belongElement = i;
+            end
+
+        end
+
+    elseif option == "Mises"
+
+        for i = 1:ElementsNum
+
+            mises = stress(i, 6);
+
+            if maxStress < mises
+                maxStress = mises;
+                belongElement = i;
+            end
+
         end
 
     end
 
     return;
+
+end
+
+function F = AddCentralizedLoad(F, nodeIndex, force, option)
+
+    if option == "x"
+
+        F(nodeIndex * 2 - 1) = F(nodeIndex * 2 - 1) + force;
+
+    elseif option == "y"
+
+        F(nodeIndex * 2) = F(nodeIndex * 2) + force;
+
+    else
+
+        disp("无效输入");
+
+    end
+
+end
+
+function OutPutRegionData(Nodes, Elements, xx, yy, radius)
+
+    fprintf('Nodes:\n');
+    NodesNum = size(Nodes, 1);
+
+    for i = 1:NodesNum
+        x = Nodes(i, 1);
+        y = Nodes(i, 2);
+
+        if abs(x - xx) < radius && abs(y - yy) < radius
+            fprintf('%d:(%.2f,%.2f)\n', i, x, y);
+        end
+
+    end
+
+    fprintf('Elements:\n');
+    ElementsNum = size(Elements, 1);
+
+    for i = 1:ElementsNum
+
+        x1 = Nodes(Elements(i, 1), 1);
+        x2 = Nodes(Elements(i, 2), 1);
+        x3 = Nodes(Elements(i, 3), 1);
+        y1 = Nodes(Elements(i, 1), 2);
+        y2 = Nodes(Elements(i, 2), 2);
+        y3 = Nodes(Elements(i, 3), 2);
+
+        x = (x1 + x2 + x3) / 3;
+        y = (y1 + y2 + y3) / 3;
+
+        if abs(x - xx) < radius && abs(y - yy) < radius
+            fprintf('%d:(%.2f,%.2f)——(%.2f,%.2f)(%.2f,%.2f)(%.2f,%.2f)\n', i, x, y, x1, y1, x2, y2, x3, y3);
+        end
+
+    end
 
 end
